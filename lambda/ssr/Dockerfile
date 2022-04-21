@@ -10,6 +10,7 @@ RUN apk add chromium
 COPY package*.json ./
 
 # install project dependencies
+RUN npm install -g chromium
 RUN npm install
 
 # copy project files and folders to the current working directory (i.e. 'app' folder)

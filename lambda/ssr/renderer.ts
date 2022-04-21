@@ -1,6 +1,7 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
 
 const PUPPETEER_LAUNCH_CONFIG = {
+    executablePath: '/usr/bin/chromium-browser',
     headless: true,
     args: [
         "--disable-gpu",

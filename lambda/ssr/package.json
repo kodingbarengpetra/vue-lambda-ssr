@@ -15,9 +15,10 @@
   "dependencies": {
     "express": "^4.17.3",
     "http-proxy-middleware": "^2.0.6",
-    "puppeteer": "^13.6.0"
+    "puppeteer-core": "^13.6.0"
   },
   "devDependencies": {
+    "@types/aws-lambda": "^8.10.94",
     "@types/express": "^4.17.13",
     "@types/node": "^17.0.25",
     "@types/puppeteer": "^5.4.5",
