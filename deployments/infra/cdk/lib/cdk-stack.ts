@@ -1,5 +1,5 @@
 import { CfnOutput, Stack, StackProps } from 'aws-cdk-lib';
-import { CachePolicy, Distribution, OriginAccessIdentity } from 'aws-cdk-lib/aws-cloudfront';
+import { CachePolicy, Distribution, OriginAccessIdentity, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
 import { S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { BlockPublicAccess, Bucket } from 'aws-cdk-lib/aws-s3';
@@ -39,7 +39,7 @@ export class VueLambdaSsrStack extends Stack {
             defaultBehavior: {
                 origin,
                 cachePolicy: CachePolicy.CACHING_DISABLED,
-                
+                viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
             },
             defaultRootObject: 'index.html',
             errorResponses: [
