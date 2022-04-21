@@ -1,9 +1,17 @@
 version: "3.9"
     
 services:
-  web:
-    build: ./web/
+  ssrb:
+    build: ./lambda/ssr/
     volumes:
-      - ./web:/app
+      - ./lambda/ssr:/app
     ports:
-      - "8080:8080"
+      - "3000:3000"
+    environment:
+      ORIGIN_BASE_URL: "http://web:80"
+  web:
+    image: nginx:latest
+    ports:
+      - "8080:80"
+    volumes:
+      - ./web/dist:/usr/share/nginx/html
