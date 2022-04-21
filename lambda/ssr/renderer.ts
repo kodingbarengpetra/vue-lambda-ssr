@@ -1,21 +1,5 @@
 import puppeteer from 'puppeteer';
 
-const ALLOWED_REQUEST_HEADERS = [
-    'user-agent',
-    'accept',
-    'accept-language',
-    'accept-encoding',
-    'cache-control',
-];
-
-const ALLOWED_RESPONSE_HEADERS = [
-    'content-type',
-    'content-length',
-    'last-modified',
-    'etag',
-    'accept-ranges',
-];
-
 const PUPPETEER_LAUNCH_CONFIG = {
     headless: true,
     args: [
@@ -28,7 +12,6 @@ const PUPPETEER_LAUNCH_CONFIG = {
 
 const renderUrl = async (url: string): Promise<string> => {
 
-    const start = Date.now();
     const browser = await puppeteer.launch(PUPPETEER_LAUNCH_CONFIG);
     const page = await browser.newPage();
 
@@ -44,8 +27,6 @@ const renderUrl = async (url: string): Promise<string> => {
         const html = await page.content();
         await browser.close();
     
-        const ttRenderMs = Date.now() - start;
-        console.info(`Headless rendered page in: ${ttRenderMs}ms`);
         return html;
 
     } catch (err) {
