@@ -19,5 +19,5 @@ COPY . .
 # build the web
 RUN npm run build
 
-EXPOSE 8080
+EXPOSE 80
 CMD [ "npm", "run", "serve" ]
