@@ -29,11 +29,11 @@ exports.handler =  async function(event, context, callback) {
     request.headers['x-is-bot'] = getBotRequestHeader(userAgent);
     
 
-    console.log('Event: ', JSON.stringify(event, null, 2));
-    console.log('Record: ', JSON.stringify(cf, null, 2));
-    console.log('Context: ', JSON.stringify(context, null, 2));
-    console.log('Request: ', JSON.stringify(request, null, 2));
-    console.log('Response: ', JSON.stringify(response, null, 2));
+    // console.log('Event: ', JSON.stringify(event, null, 2));
+    // console.log('Record: ', JSON.stringify(cf, null, 2));
+    // console.log('Context: ', JSON.stringify(context, null, 2));
+    // console.log('Request: ', JSON.stringify(request, null, 2));
+    // console.log('Response: ', JSON.stringify(response, null, 2));
 
     callback(null, request);
 }
