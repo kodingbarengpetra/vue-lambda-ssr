@@ -7,7 +7,7 @@ import { Bucket } from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source as S3Source } from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
 import * as path from 'path';
-import { Secret, ReplicaRegion } from 'aws-cdk-lib/aws-secretsmanager';
+import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
 
 export class VueLambdaSsrEdgeStack extends Stack {
     private websiteBucket: Bucket;
@@ -15,7 +15,7 @@ export class VueLambdaSsrEdgeStack extends Stack {
     private logBucket: Bucket;
     private distribution: Distribution;
 
-    private rendererFunctionSecret: Secret;
+    private originRequestFunctionSecrets: Secret;
     private rendererFunction: Function;
     private rendererFunctionUrl: FunctionUrl;
 
@@ -35,9 +35,10 @@ export class VueLambdaSsrEdgeStack extends Stack {
         this.rendererFunctionUrl = this.rendererFunction.addFunctionUrl({
             authType: FunctionUrlAuthType.NONE,
         });
-        this.rendererFunctionSecret = this.createRendererFunctionSecret({
+        this.originRequestFunctionSecrets = this.createRendererFunctionSecret({
             FUNCTION_ARN: this.rendererFunction.functionArn,
             FUNCTION_URL: this.rendererFunctionUrl.url,
+            RENDER_BUCKET_DOMAIN: this.renderBucket.bucketWebsiteDomainName,
         });
 
         this.originRequestEdgeFunction = this.createOriginRequestEdgeFunction();
@@ -45,7 +46,8 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
         this.rendererFunction.grantInvoke(this.originRequestEdgeFunction);
         this.rendererFunctionUrl.grantInvokeUrl(this.originRequestEdgeFunction);
-        this.rendererFunctionSecret.grantRead(this.originRequestEdgeFunction);
+
+        this.originRequestFunctionSecrets.grantRead(this.originRequestEdgeFunction);
 
         this.distribution = this.createDistribution(
             this.websiteBucket,
@@ -188,61 +190,6 @@ export class VueLambdaSsrEdgeStack extends Stack {
             ],
         });
     }
-
-
-    // private siteBucket: Bucket;
-    // private renderBucket: Bucket;
-
-    // private distribution: Distribution;
-
-    // private viewerRequestEdgeFunction: cloudfront.experimental.EdgeFunction;
-    // private originRequestEdgeFunction: cloudfront.experimental.EdgeFunction;
-
-    // private rendererFunction: Function;
-    // private rendererFunctionUrl: FunctionUrl;
-
-    // private rendererFunctionUrlSecret: Secret;
-    // private renderBucketDomainSecret: Secret;
-
-    // createDistribution(siteBucket: Bucket, logBucket: Bucket, viewerRequestEdgeFunction: cloudfront.experimental.EdgeFunction, originRequestEdgeFunction: cloudfront.experimental.EdgeFunction): Distribution {
-    //     const origin = new S3Origin(siteBucket, {
-    //         originPath: '/'
-    //     });
-
-    //     const requestPolicy = new OriginRequestPolicy(this, 'OriginRequestPolicy', {
-    //         headerBehavior: OriginRequestHeaderBehavior.allowList(
-    //             'X-Is-Bot',
-    //         )
-    //     });
-    //     return new Distribution(this, 'Distribution', {
-    //         defaultBehavior: {
-    //             origin,
-    //             cachePolicy: CachePolicy.CACHING_DISABLED,
-    //             viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-    //             edgeLambdas: [
-    //                 {
-    //                     functionVersion: viewerRequestEdgeFunction.currentVersion,
-    //                     eventType: LambdaEdgeEventType.VIEWER_REQUEST,
-    //                 },
-    //                 {
-    //                     functionVersion: originRequestEdgeFunction.currentVersion,
-    //                     eventType: LambdaEdgeEventType.ORIGIN_REQUEST,
-    //                 }
-    //             ],
-    //             originRequestPolicy: requestPolicy,
-    //         },
-    //         logBucket: logBucket,
-    //         logFilePrefix: 'cloudfront-access/',
-    //         defaultRootObject: 'index.html',
-    //         errorResponses: [
-    //             {
-    //                 httpStatus: 404,
-    //                 responseHttpStatus: 200,
-    //                 responsePagePath: '/index.html',
-    //             }
-    //         ],
-    //     });
-    // }
 
     outputs() {
         return [

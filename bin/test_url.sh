@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
+URL="https://$1$2"
 while true;
 do
     echo "Bot Request:";
-    curl --user-agent "Googlebot/2.1 (+http://www.google.com/bot.html)" $1;
+    curl --user-agent "Googlebot/2.1 (+http://www.google.com/bot.html)" $URL;
     echo -e "\n\n\n\n";
     sleep 1;
     echo "Normal Request:";
-    curl $1;
+    curl $URL;
     echo -e "\n\n\n\n";
     sleep 1;
 done
