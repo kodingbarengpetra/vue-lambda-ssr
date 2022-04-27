@@ -11,6 +11,7 @@ import { Secret, ReplicaRegion } from 'aws-cdk-lib/aws-secretsmanager';
 
 export class VueLambdaSsrEdgeStack extends Stack {
     private websiteBucket: Bucket;
+    private renderBucket: Bucket;
     private logBucket: Bucket;
     private distribution: Distribution;
 
@@ -18,12 +19,19 @@ export class VueLambdaSsrEdgeStack extends Stack {
     private rendererFunction: Function;
     private rendererFunctionUrl: FunctionUrl;
 
+    private originRequestEdgeFunction: cloudfront.experimental.EdgeFunction;
+    private viewerRequestEdgeFunction: cloudfront.experimental.EdgeFunction;
+
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
         this.logBucket = this.createLogBucket();
 
         this.websiteBucket = this.createWebsiteBucket(this.logBucket);
-        this.rendererFunction = this.createRendererFunction();
+        this.renderBucket = this.createRenderBucket(this.logBucket);
+        this.rendererFunction = this.createRendererFunction(
+            this.websiteBucket,
+            this.renderBucket
+        );
         this.rendererFunctionUrl = this.rendererFunction.addFunctionUrl({
             authType: FunctionUrlAuthType.NONE,
         });
@@ -32,8 +40,18 @@ export class VueLambdaSsrEdgeStack extends Stack {
             FUNCTION_URL: this.rendererFunctionUrl.url,
         });
 
+        this.originRequestEdgeFunction = this.createOriginRequestEdgeFunction();
+        this.viewerRequestEdgeFunction = this.createViewerRequestEdgeFunction();
+
+        this.rendererFunction.grantInvoke(this.originRequestEdgeFunction);
+        this.rendererFunctionUrl.grantInvokeUrl(this.originRequestEdgeFunction);
+        this.rendererFunctionSecret.grantRead(this.originRequestEdgeFunction);
+
         this.distribution = this.createDistribution(
-            this.websiteBucket
+            this.websiteBucket,
+            this.logBucket,
+            this.originRequestEdgeFunction,
+            this.viewerRequestEdgeFunction
         );
         this.outputs();
     }
@@ -63,18 +81,36 @@ export class VueLambdaSsrEdgeStack extends Stack {
         return bucket;
     }
 
-    createRendererFunction() {
+    createRenderBucket(logBucket: Bucket): Bucket {
+        return new Bucket(this, 'RenderBucket', {
+            websiteIndexDocument: 'index.html',
+            websiteErrorDocument: 'index.html',
+            publicReadAccess: true,
+            serverAccessLogsBucket: logBucket,
+            serverAccessLogsPrefix: 'render-bucket-access/',
+            versioned: true
+        });
+    }
+
+    createRendererFunction(websiteBucket: Bucket, renderBucket: Bucket) {
         const assetPath = path.join(__dirname, '../../../../lambda/renderer');
         const code = Code.fromAsset(assetPath);    
 
-        return new Function(this, 'RendererFunction', {
+        const func = new Function(this, 'RendererFunction', {
             runtime: Runtime.NODEJS_14_X,
             handler: 'index.handler',
             code,
             memorySize: 10240,
             ephemeralStorageSize: Size.gibibytes(1),
-            timeout: Duration.minutes(1),
+            timeout: Duration.seconds(30),
+            environment: {
+                WEBSITE_BUCKET_DOMAIN_NAME: websiteBucket.bucketWebsiteDomainName,
+                RENDER_BUCKET_NAME: renderBucket.bucketName,
+            }
         });
+
+        renderBucket.grantReadWrite(func);
+        return func;
     }
 
     createRendererFunctionSecret(secret: any) {
@@ -85,10 +121,42 @@ export class VueLambdaSsrEdgeStack extends Stack {
         });
     }
 
+    createOriginRequestEdgeFunction() {
+        const assetPath = path.join(__dirname, '../../../../lambda/edge-origin-request');
+        const code = Code.fromAsset(assetPath);     
+        return new cloudfront.experimental.EdgeFunction(this, `OriginRequestEdgeFunction`, {
+            runtime: Runtime.NODEJS_14_X,
+            handler: 'index.handler',
+            code,
+            timeout: Duration.seconds(30),
+        });
+    }
 
-    createDistribution(websiteBucket: Bucket) {
+    createViewerRequestEdgeFunction() {
+        const assetPath = path.join(__dirname, '../../../../lambda/edge-viewer-request');
+        const code = Code.fromAsset(assetPath);     
+        return new cloudfront.experimental.EdgeFunction(this, `ViewerRequestEdgeFunction`, {
+            runtime: Runtime.NODEJS_14_X,
+            handler: 'index.handler',
+            code,
+            timeout: Duration.seconds(5),
+        });
+    }
+
+    createDistribution(
+        websiteBucket: Bucket,
+        logBucket: Bucket,
+        originRequestEdgeFunction: cloudfront.experimental.EdgeFunction,
+        viewerRequestEdgeFunction: cloudfront.experimental.EdgeFunction
+    ) {
         const origin = new S3Origin(websiteBucket, {
             originPath: '/'
+        });
+
+        const requestPolicy = new OriginRequestPolicy(this, 'OriginRequestPolicy', {
+            headerBehavior: OriginRequestHeaderBehavior.allowList(
+                'X-Is-Bot',
+            )
         });
 
         return new Distribution(this, 'Distribution', {
@@ -96,7 +164,20 @@ export class VueLambdaSsrEdgeStack extends Stack {
                 origin,
                 cachePolicy: CachePolicy.CACHING_DISABLED,
                 viewerProtocolPolicy: ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                originRequestPolicy: requestPolicy,
+                edgeLambdas: [
+                    {
+                        functionVersion: viewerRequestEdgeFunction.currentVersion,
+                        eventType: LambdaEdgeEventType.VIEWER_REQUEST,
+                    },
+                    {
+                        functionVersion: originRequestEdgeFunction.currentVersion,
+                        eventType: LambdaEdgeEventType.ORIGIN_REQUEST,
+                    }
+                ],
             },
+            logBucket: logBucket,
+            logFilePrefix: 'cloudfront-access/',
             defaultRootObject: 'index.html',
             errorResponses: [
                 {
@@ -122,116 +203,6 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
     // private rendererFunctionUrlSecret: Secret;
     // private renderBucketDomainSecret: Secret;
-
-
-
-    //     this.siteBucket = this.createSiteBucket(this.logBucket);
-    //     this.renderBucket = this.createRenderBucket(this.logBucket);
-    //     this.renderBucketDomainSecret = this.createRenderBucketDomainSecret(this.renderBucket.bucketWebsiteDomainName);
-
-    //     this.rendererFunction = this.createRendererFunction(this.siteBucket, this.renderBucket);
-    //     this.rendererFunctionUrl = this.createRendererFunctionUrl(this.rendererFunction);
-    //     this.rendererFunctionUrlSecret = this.createRendererFunctionUrlSecret(this.rendererFunctionUrl.url);
-
-    //     this.viewerRequestEdgeFunction = this.createViewerRequestEdgeFunction();
-    //     this.originRequestEdgeFunction = this.createOriginRequestEdgeFunction();
-        
-    //     this.rendererFunctionUrl.grantInvokeUrl(this.originRequestEdgeFunction);
-    //     this.rendererFunctionUrlSecret.grantRead(this.originRequestEdgeFunction);
-    //     this.renderBucketDomainSecret.grantRead(this.originRequestEdgeFunction);
-        
-    //     this.distribution = this.createDistribution(
-    //         this.siteBucket,
-    //         this.logBucket,
-    //         this.viewerRequestEdgeFunction,
-    //         this.originRequestEdgeFunction
-    //     );
-
-    //     this.deploySite(this.siteBucket);
-
-    //     this.outputs();
-    // }
-
-
-    // }
-
-
-
-    // createRenderBucket(logBucket: Bucket): Bucket {
-    //     return new Bucket(this, 'RenderBucket', {
-    //         websiteIndexDocument: 'index.html',
-    //         websiteErrorDocument: 'index.html',
-    //         publicReadAccess: true,
-    //         serverAccessLogsBucket: logBucket,
-    //         serverAccessLogsPrefix: 'render-bucket-access/',
-    //         versioned: true,
-    //         removalPolicy: RemovalPolicy.DESTROY,
-    //     });
-    // }
-
-    // createRendererFunctionUrlSecret(url: string) {
-    //     return new Secret(this, 'RendererFunctionUrlSecret', {
-    //         secretName: 'RENDERER_FUNCTION_URL',
-    //         secretStringValue: new SecretValue(url),
-    //         removalPolicy: RemovalPolicy.DESTROY,
-    //     });
-    // }
-
-    // createRenderBucketDomainSecret(bucketDns: string) {
-    //     return new Secret(this, 'RenderBucketDomainNameSecret', {
-    //         secretName: 'RENDER_BUCKET_DOMAIN_NAME',
-    //         secretStringValue: new SecretValue(bucketDns),
-    //         removalPolicy: RemovalPolicy.DESTROY,
-    //     });
-    // }
-
-    // createViewerRequestEdgeFunction(): cloudfront.experimental.EdgeFunction {
-    //     const assetPath = path.join(__dirname, '../../../../lambda/edge-viewer-request');
-    //     const code = Code.fromAsset(assetPath);     
-    //     return new cloudfront.experimental.EdgeFunction(this, `ViewerRequestEdgeFunction`, {
-    //         runtime: Runtime.NODEJS_14_X,
-    //         handler: 'index.handler',
-    //         code,
-    //     });
-    // }
-
-    // createOriginRequestEdgeFunction(): cloudfront.experimental.EdgeFunction {
-    //     const assetPath = path.join(__dirname, '../../../../lambda/edge-origin-request');
-    //     const code = Code.fromAsset(assetPath);     
-    //     return new cloudfront.experimental.EdgeFunction(this, `OriginRequestEdgeFunction`, {
-    //         runtime: Runtime.NODEJS_14_X,
-    //         handler: 'index.handler',
-    //         code,
-    //     });
-    // }
-
-    // createRendererFunction(siteBucket: Bucket, renderBucket: Bucket): Function {
-    //     const assetPath = path.join(__dirname, '../../../../lambda/renderer');
-    //     const code = Code.fromAsset(assetPath);     
-    //     const func = new Function(this, `RendererFunction`, {
-    //         runtime: Runtime.NODEJS_14_X,
-    //         handler: 'index.handler',
-    //         code,
-    //         memorySize: 10240,
-    //         ephemeralStorageSize: Size.gibibytes(1),
-    //         timeout: Duration.minutes(1),
-    //         environment: {
-    //             SITE_BUCKET_URL: siteBucket.bucketWebsiteDomainName,
-    //             RENDER_BUCKET: renderBucket.bucketName,
-    //         }
-    //     });
-
-    //     siteBucket.grantRead(func);
-    //     renderBucket.grantReadWrite(func);
-
-    //     return func;
-    // }
-
-    // createRendererFunctionUrl(func: Function): FunctionUrl {
-    //     return func.addFunctionUrl({
-    //         authType: FunctionUrlAuthType.NONE,
-    //     });
-    // }
 
     // createDistribution(siteBucket: Bucket, logBucket: Bucket, viewerRequestEdgeFunction: cloudfront.experimental.EdgeFunction, originRequestEdgeFunction: cloudfront.experimental.EdgeFunction): Distribution {
     //     const origin = new S3Origin(siteBucket, {
@@ -273,49 +244,19 @@ export class VueLambdaSsrEdgeStack extends Stack {
     //     });
     // }
 
-    // createBucketWebsiteDnsSecret(bucket: Bucket): Secret {
-    //     return new Secret(this, 'BucketDomainNameSecret', {
-    //         secretName: 'SITE_BUCKET_DOMAIN_NAME',
-    //         secretStringValue: new SecretValue(bucket.bucketWebsiteDomainName),
-    //         removalPolicy: RemovalPolicy.DESTROY,
-    //     });
-    // }
-
-    // deploySite(siteBucket: Bucket) {
-    //     const assetPath = path.join(__dirname, '../../../../web/dist');
-    //     new BucketDeployment(this, 'DeployWebsite', {
-    //         sources: [
-    //             S3Source.asset(assetPath)
-    //         ],
-    //         destinationBucket: siteBucket,
-    //     });
-    // }
-
-    // outputs() {
-    //     return [
-    //         new CfnOutput(this, 'SiteBucketName', { value: this.siteBucket.bucketName }),
-    //         new CfnOutput(this, 'SiteBucketDomainName', { value: this.siteBucket.bucketDomainName }),
-
-    //         new CfnOutput(this, 'RenderBucketName', { value: this.renderBucket.bucketName }),
-    //         new CfnOutput(this, 'RenderBucketDomainName', { value: this.renderBucket.bucketDomainName }),
-
-    //         new CfnOutput(this, 'DistributionId', { value: this.distribution.distributionId }),
-    //         new CfnOutput(this, 'DistributionDns', { value: this.distribution.distributionDomainName }),    
-
-    //         new CfnOutput(this, 'RendererFunctionUrl', { value: this.rendererFunctionUrl.url }),
-    //     ];
-    // }
-
     outputs() {
         return [
             new CfnOutput(this, 'WebsiteBucketName', { value: this.websiteBucket.bucketName }),
             new CfnOutput(this, 'WebsiteBucketUrl', { value: this.websiteBucket.bucketWebsiteUrl }),
+            new CfnOutput(this, 'RenderBucketName', { value: this.renderBucket.bucketName }),
+            new CfnOutput(this, 'RenderBucketUrl', { value: this.renderBucket.bucketWebsiteUrl }),
+
             new CfnOutput(this, 'RendererFunctionArn', { value: this.rendererFunction.functionArn }),
             new CfnOutput(this, 'RendererFunctionUrl', { value: this.rendererFunctionUrl.url }),
+            new CfnOutput(this, 'OriginRequestEdgeFunctionArn', { value: this.originRequestEdgeFunction.edgeArn }),
+            new CfnOutput(this, 'ViewerRequestEdgeFunctionArn', { value: this.viewerRequestEdgeFunction.edgeArn }),
             new CfnOutput(this, 'DistributionId', { value: this.distribution.distributionId }),
             new CfnOutput(this, 'DistributionDomain', { value: this.distribution.domainName }),
         ];
-        // new CfnOutput(this, 'EdgeFunctionArn', { value: this.edgeFunction.edgeArn });
-
     }
 }

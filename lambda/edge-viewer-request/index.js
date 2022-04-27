@@ -1,7 +1,9 @@
 'use strict';
 
 exports.handler =  async function(event, context, callback) {
-    console.dir(event);
+    console.log('Event: ', JSON.stringify(event, null, 2));
+    const request = event.Records[0].cf.request;
+    
     callback(null, request);
 }
 
