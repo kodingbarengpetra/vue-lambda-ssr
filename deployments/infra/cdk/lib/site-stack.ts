@@ -1,6 +1,6 @@
 import { CfnOutput, Duration, RemovalPolicy, SecretValue, Size, Stack, StackProps } from 'aws-cdk-lib';
-import { CachePolicy, Distribution, LambdaEdgeEventType, OriginAccessIdentity, OriginRequestHeaderBehavior, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
-import { S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
+import { CachePolicy, Distribution, IOrigin, LambdaEdgeEventType, OriginAccessIdentity, OriginRequestHeaderBehavior, OriginRequestPolicy, ViewerProtocolPolicy } from 'aws-cdk-lib/aws-cloudfront';
+import { OriginGroup, S3Origin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import { Code, Function, FunctionUrl, FunctionUrlAuthType, LayerVersion, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { Bucket } from 'aws-cdk-lib/aws-s3';
@@ -8,6 +8,7 @@ import { BucketDeployment, Source as S3Source } from 'aws-cdk-lib/aws-s3-deploym
 import { Construct } from 'constructs';
 import * as path from 'path';
 import { Secret } from 'aws-cdk-lib/aws-secretsmanager';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 
 export class VueLambdaSsrEdgeStack extends Stack {
     private websiteBucket: Bucket;
@@ -38,7 +39,7 @@ export class VueLambdaSsrEdgeStack extends Stack {
         this.originRequestFunctionSecrets = this.createRendererFunctionSecret({
             FUNCTION_ARN: this.rendererFunction.functionArn,
             FUNCTION_URL: this.rendererFunctionUrl.url,
-            RENDER_BUCKET_DOMAIN: this.renderBucket.bucketWebsiteDomainName,
+            RENDER_BUCKET_DOMAIN: this.renderBucket.bucketRegionalDomainName,
         });
 
         this.originRequestEdgeFunction = this.createOriginRequestEdgeFunction();
@@ -51,6 +52,7 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
         this.distribution = this.createDistribution(
             this.websiteBucket,
+            this.renderBucket,
             this.logBucket,
             this.originRequestEdgeFunction,
             this.viewerRequestEdgeFunction
@@ -65,9 +67,6 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
     createWebsiteBucket(logBucket: Bucket) {
         const bucket = new Bucket(this, 'WebsiteBucket', {
-            websiteIndexDocument: 'index.html',
-            websiteErrorDocument: 'index.html',
-            publicReadAccess: true,
             serverAccessLogsBucket: logBucket,
             serverAccessLogsPrefix: 'bucket-access/',
         });
@@ -85,9 +84,6 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
     createRenderBucket(logBucket: Bucket): Bucket {
         return new Bucket(this, 'RenderBucket', {
-            websiteIndexDocument: 'index.html',
-            websiteErrorDocument: 'index.html',
-            publicReadAccess: true,
             serverAccessLogsBucket: logBucket,
             serverAccessLogsPrefix: 'render-bucket-access/',
             versioned: true
@@ -117,7 +113,7 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
     createRendererFunctionSecret(secret: any) {
         return new Secret(this, 'RendererFunctionSecret', {
-            secretName: 'VUE_SSR_LAMBDA_EDGE_SECRETS',
+            secretName: 'VUE_SSR_LAMBDA_EDGE_2_SECRETS',
             secretStringValue: new SecretValue(JSON.stringify(secret)),
             removalPolicy: RemovalPolicy.DESTROY,
         });
@@ -147,13 +143,12 @@ export class VueLambdaSsrEdgeStack extends Stack {
 
     createDistribution(
         websiteBucket: Bucket,
+        renderBucket: Bucket,
         logBucket: Bucket,
         originRequestEdgeFunction: cloudfront.experimental.EdgeFunction,
         viewerRequestEdgeFunction: cloudfront.experimental.EdgeFunction
     ) {
-        const origin = new S3Origin(websiteBucket, {
-            originPath: '/'
-        });
+        const origin = this.createDistributionOrigin(websiteBucket, renderBucket);
 
         const requestPolicy = new OriginRequestPolicy(this, 'OriginRequestPolicy', {
             headerBehavior: OriginRequestHeaderBehavior.allowList(
@@ -189,6 +184,41 @@ export class VueLambdaSsrEdgeStack extends Stack {
                 }
             ],
         });
+    }
+
+    createDistributionOrigin(websiteBucket: Bucket,
+        renderBucket: Bucket): IOrigin {
+        return new OriginGroup({
+            primaryOrigin: this.createBucketOrigin(websiteBucket),
+            fallbackOrigin: this.createBucketOrigin(renderBucket),
+        });
+    }
+
+    createBucketOrigin(bucket: Bucket) {
+        return new S3Origin(bucket, {
+            originPath: '/',
+            originAccessIdentity: this.createOriginAccessIdentity(bucket),
+        });
+    }
+
+    createOriginAccessIdentity(bucket: Bucket): OriginAccessIdentity {
+        const oai = new OriginAccessIdentity(this, `OriginAccessIdentity_${bucket.node.id}`, {
+            comment: 'Origin Access Identity for ' + bucket.node.id,
+        });
+        const access = new PolicyStatement();
+        access.addActions('s3:GetBucket*');
+        access.addActions('s3:GetObject*');
+        access.addActions('s3:List*');
+        access.addResources(bucket.bucketArn);
+        access.addResources(`${bucket.bucketArn}/*`);
+        access.addCanonicalUserPrincipal(
+            oai.cloudFrontOriginAccessIdentityS3CanonicalUserId
+        );
+
+        access.addResources(bucket.bucketArn);
+        access.addResources(`${bucket.bucketArn}/*`);
+        bucket.addToResourcePolicy(access);
+        return oai;
     }
 
     outputs() {

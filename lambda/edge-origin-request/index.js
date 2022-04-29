@@ -20,7 +20,7 @@ async function getSecrets() {
         region: REGION
     });
     const command = new GetSecretValueCommand({
-        SecretId: 'VUE_SSR_LAMBDA_EDGE_SECRETS',
+        SecretId: 'VUE_SSR_LAMBDA_EDGE_2_SECRETS',
     });
 
     const response = await client.send(command);
@@ -45,7 +45,7 @@ async function invokeRendererLambda(arn, path) {
 }
 
 async function modifyRequestHeaderToRenderBucket(request, rendererDomain) {
-    request.headers['host'] = [{key: 'host',  value: rendererDomain}];
+    request.headers['host'] = [{key: 'Host',  value: rendererDomain}];
     if (request.origin.custom) {
         request.origin.custom.domainName = rendererDomain;
     } else if (request.origin.s3) {

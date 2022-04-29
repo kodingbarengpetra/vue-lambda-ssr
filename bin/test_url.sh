@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-URL="https://$1$2"
+URL=$1
 while true;
 do
     echo "Bot Request:";

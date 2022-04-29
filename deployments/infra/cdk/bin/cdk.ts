@@ -5,7 +5,7 @@ import { VueLambdaSsrEdgeStack } from '../lib/site-stack';
 
 const app = new cdk.App();
 
-new VueLambdaSsrEdgeStack(app, 'VueLambdaSsrEdgeStack', {
+new VueLambdaSsrEdgeStack(app, 'VueLambdaSsrEdge2Stack', {
     env: {
         region: 'us-east-1',
     }
